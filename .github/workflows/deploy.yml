@@ -1,0 +1,126 @@
+name: Deploy
+
+# dev branch  -> what-if only, never deploys (dev is a validation branch,
+#                not a separate Azure environment — see README "Dev vs prod").
+# master branch -> real deploy, gated by the `production` GitHub Environment
+#                  (configure required reviewers on that Environment before
+#                  the first real run).
+#
+# Both jobs are gated behind the AZURE_OIDC_READY repository variable until
+# federated credentials exist — see README "OIDC setup (TODO)".
+
+on:
+  push:
+    branches:
+      - dev
+      - master
+    paths:
+      - "infra/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  what-if-dev:
+    name: what-if (dev branch)
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install/upgrade Bicep CLI
+        run: az bicep install && az bicep upgrade
+
+      - name: Build entry points
+        run: |
+          az bicep build --file infra/main.managementgroup.bicep
+          az bicep build --file infra/main.bicep
+
+      - name: Skip notice (OIDC not yet configured)
+        if: ${{ vars.AZURE_OIDC_READY != 'true' }}
+        run: |
+          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping what-if. See README 'OIDC setup (TODO)' to enable this job."
+
+      - name: Azure login (OIDC, no stored secrets)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      - name: What-if (subscription stage, dev params)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az deployment sub what-if \
+            --name azure-landing-zone-dev-${{ github.sha }} \
+            --location uksouth \
+            --template-file infra/main.bicep \
+            --parameters infra/params/dev.bicepparam
+
+  deploy-prod:
+    name: Deploy (master branch)
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    # Requires a GitHub Environment named "production" with required
+    # reviewers configured — this is what turns a push to master into an
+    # approval-gated deploy instead of an immediate one.
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install/upgrade Bicep CLI
+        run: az bicep install && az bicep upgrade
+
+      - name: Build entry points
+        run: |
+          az bicep build --file infra/main.managementgroup.bicep
+          az bicep build --file infra/main.bicep
+
+      - name: Skip notice (OIDC not yet configured)
+        if: ${{ vars.AZURE_OIDC_READY != 'true' }}
+        run: |
+          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping deploy. See README 'OIDC setup (TODO)' to enable this job."
+
+      - name: Azure login (OIDC, no stored secrets)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+
+      # What-if runs even on the deploy path so the Environment's required
+      # reviewer sees the plan before the create step below actually runs
+      # (the reviewer approves the whole job, not step-by-step, so this is
+      # belt-and-braces: check the Actions log for this step's output before
+      # approving the run).
+      - name: What-if (subscription stage, prod params)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az deployment sub what-if \
+            --name azure-landing-zone-prod-${{ github.sha }} \
+            --location uksouth \
+            --template-file infra/main.bicep \
+            --parameters infra/params/prod.bicepparam
+
+      - name: Deploy (subscription stage, prod params)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az deployment sub create \
+            --name azure-landing-zone-prod-${{ github.sha }} \
+            --location uksouth \
+            --template-file infra/main.bicep \
+            --parameters infra/params/prod.bicepparam \
+            --parameters avdAdminPassword="${{ secrets.AVD_LOCAL_ADMIN_PASSWORD }}"
+
+      # main.managementgroup.bicep (STAGE 1) is intentionally NOT deployed
+      # automatically here — it is a rare, high-privilege, one-time/rarely
+      # -changed operation (tenant scope). Run it manually from an
+      # authorized operator's machine or a separate, explicitly-triggered
+      # workflow once tenant-level permissions are confirmed. See README
+      # "Deployment order".

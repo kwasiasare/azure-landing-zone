@@ -1,0 +1,99 @@
+name: CI
+
+# Runs on every PR: compiles + lints every Bicep entry point, then (once
+# OIDC credentials exist — see README "OIDC setup") runs `what-if` against
+# the dev subscription and posts the plan as a PR comment. Nothing in this
+# workflow ever mutates cloud state.
+
+on:
+  pull_request:
+    branches:
+      - master
+      - dev
+    paths:
+      - "infra/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required for azure/login OIDC federated credential exchange
+  contents: read
+  pull-requests: write # required to post the what-if PR comment
+
+jobs:
+  lint:
+    name: Bicep build + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install/upgrade Bicep CLI
+        run: az bicep install && az bicep upgrade
+
+      - name: Build management-group entry point (tenant scope)
+        run: az bicep build --file infra/main.managementgroup.bicep
+
+      - name: Build subscription entry point
+        run: az bicep build --file infra/main.bicep
+
+      - name: Validate dev bicepparam
+        run: az bicep build-params --file infra/params/dev.bicepparam
+
+      - name: Validate prod bicepparam
+        run: az bicep build-params --file infra/params/prod.bicepparam
+
+      - name: Validate management-group bicepparam
+        run: az bicep build-params --file infra/params/managementgroup.bicepparam
+
+  what-if:
+    name: what-if (dev subscription)
+    runs-on: ubuntu-latest
+    needs: lint
+    # Gated until OIDC federated credentials exist for this repo. Set the
+    # repository variable AZURE_OIDC_READY to "true" once the app
+    # registration + federated credential + secrets below are configured —
+    # see README "OIDC setup (TODO)". Until then this job reports why it
+    # skipped instead of failing the PR.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip notice (OIDC not yet configured)
+        if: ${{ vars.AZURE_OIDC_READY != 'true' }}
+        run: |
+          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping what-if. See README 'OIDC setup (TODO)' to enable this job."
+
+      # --- Everything below only runs once AZURE_OIDC_READY == 'true' ---
+
+      - name: Azure login (OIDC, no stored secrets)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      - name: What-if (subscription stage, dev params)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az deployment sub what-if \
+            --name azure-landing-zone-pr-${{ github.event.pull_request.number }} \
+            --location uksouth \
+            --template-file infra/main.bicep \
+            --parameters infra/params/dev.bicepparam \
+            --no-pretty-print > whatif-output.txt
+          cat whatif-output.txt
+
+      - name: Post what-if output as PR comment
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('whatif-output.txt', 'utf8').slice(0, 60000);
+            const body = `### Azure what-if — subscription stage (dev)\n\n<details><summary>Show plan</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
