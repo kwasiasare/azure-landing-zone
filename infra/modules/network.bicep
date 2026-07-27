@@ -42,8 +42,11 @@ param avdSubnetPrefix string = '10.1.1.0/24'
 @description('Deploy Azure Bastion in the hub. Keep false by default to control cost; flip to true only while demoing interactive access.')
 param deployBastion bool = false
 
-@description('PLACEHOLDER: CIDR allowed to reach management ports (RDP/SSH) on workload/AVD subnets, e.g. your own public IP as x.x.x.x/32. Left as a private RFC1918 range by default so the rule is inert until you scope it down to something real — never leave this as 0.0.0.0/0.')
-param trustedAdminSourceCidr string = '10.0.0.0/8'
+@description('PLACEHOLDER: CIDR allowed to reach management ports (RDP/SSH) on workload/AVD subnets, e.g. your own public IP as x.x.x.x/32. Defaults to 192.0.2.0/24 (TEST-NET-1, RFC 5737) — a documentation/testing range that is never routable on the real Internet or assignable to a real client, so the rule is genuinely inert until you scope it down to something real. (A prior default of 10.0.0.0/8 was NOT actually inert: it is a real, commonly-used private range and would have matched real RFC1918 traffic from on-prem/VPN-connected clients.) Never leave this as 0.0.0.0/0.')
+param trustedAdminSourceCidr string = '192.0.2.0/24'
+
+@description('PLACEHOLDER — resource ID of the central Log Analytics workspace (monitoring.bicep output). Leave empty to skip the hub vnet diagnostic-setting worked example below.')
+param logAnalyticsWorkspaceResourceId string = ''
 
 @description('Tags applied to every network resource.')
 param tags object = {}
@@ -58,6 +61,7 @@ module hubNetwork 'network-hub.bicep' = {
     sharedServicesSubnetPrefix: sharedServicesSubnetPrefix
     deployBastion: deployBastion
     trustedAdminSourceCidr: trustedAdminSourceCidr
+    logAnalyticsWorkspaceResourceId: logAnalyticsWorkspaceResourceId
     tags: tags
   }
 }

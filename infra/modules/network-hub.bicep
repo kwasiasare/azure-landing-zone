@@ -21,8 +21,11 @@ param sharedServicesSubnetPrefix string = '10.0.1.0/24'
 @description('Deploy Azure Bastion in the hub.')
 param deployBastion bool = false
 
-@description('PLACEHOLDER — CIDR allowed to reach management ports on hub resources.')
-param trustedAdminSourceCidr string = '10.0.0.0/8'
+@description('PLACEHOLDER — CIDR allowed to reach management ports on hub resources. Defaults to 192.0.2.0/24 (TEST-NET-1, RFC 5737) — genuinely non-routable, unlike a real RFC1918 range.')
+param trustedAdminSourceCidr string = '192.0.2.0/24'
+
+@description('PLACEHOLDER — resource ID of the central Log Analytics workspace (monitoring.bicep output). Leave empty to skip the diagnostic setting below.')
+param logAnalyticsWorkspaceResourceId string = ''
 
 @description('Tags applied to hub network resources.')
 param tags object = {}
@@ -227,6 +230,27 @@ resource vnetHub 'Microsoft.Network/virtualNetworks@2023-05-01' = {
           ]
         : []
     )
+  }
+}
+
+// Worked example of a direct (non-policy) diagnostic setting: routes
+// vnet-hub's platform metrics to the central Log Analytics workspace.
+// Complements (does not replace) the NSG-diagnostics DeployIfNotExists
+// policy in modules/policy.bicep, which handles NSGs tenant/mg-wide —
+// virtual networks themselves only expose metrics (no resource log
+// categories), so that's what this setting routes. Skipped when no
+// workspace ID is supplied (e.g. before monitoring.bicep has run once).
+resource vnetHubDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceResourceId)) {
+  name: 'diag-vnet-hub-to-la'
+  scope: vnetHub
+  properties: {
+    workspaceId: logAnalyticsWorkspaceResourceId
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
   }
 }
 

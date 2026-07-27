@@ -17,8 +17,8 @@ param workloadSubnetPrefix string = '10.1.0.0/24'
 @description('Subnet prefix for AVD session hosts in the spoke.')
 param avdSubnetPrefix string = '10.1.1.0/24'
 
-@description('PLACEHOLDER — CIDR allowed to reach management ports on spoke resources.')
-param trustedAdminSourceCidr string = '10.0.0.0/8'
+@description('PLACEHOLDER — CIDR allowed to reach management ports on spoke resources. Defaults to 192.0.2.0/24 (TEST-NET-1, RFC 5737) — genuinely non-routable, unlike a real RFC1918 range.')
+param trustedAdminSourceCidr string = '192.0.2.0/24'
 
 @description('Tags applied to spoke network resources.')
 param tags object = {}
