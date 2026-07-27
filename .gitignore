@@ -1,0 +1,17 @@
+# Bicep compiled output (ARM JSON) — build artifacts, not source
+*.json
+!.github/**/*.json
+
+# Local az / bicep tooling scratch
+.bicep/
+whatif-output.txt
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+
+# Never commit real credentials or local overrides
+*.local.bicepparam
+.env
