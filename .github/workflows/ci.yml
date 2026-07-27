@@ -1,9 +1,9 @@
 name: CI
 
-# Runs on every PR: compiles + lints every Bicep entry point, then (once
-# OIDC credentials exist — see README "OIDC setup") runs `what-if` against
-# the dev subscription and posts the plan as a PR comment. Nothing in this
-# workflow ever mutates cloud state.
+# Runs on every PR: compiles + lints every Bicep entry point, parse-validates
+# every PowerShell script, then (once OIDC credentials exist — see README
+# "OIDC setup") runs `what-if` against the dev subscription and posts the
+# plan as a PR comment. Nothing in this workflow ever mutates cloud state.
 
 on:
   pull_request:
@@ -12,8 +12,12 @@ on:
       - dev
     paths:
       - "infra/**"
+      - "scripts/**"
       - ".github/workflows/ci.yml"
   workflow_dispatch: {}
+
+env:
+  AZURE_LOCATION: uksouth
 
 permissions:
   id-token: write # required for azure/login OIDC federated credential exchange
@@ -45,46 +49,78 @@ jobs:
       - name: Validate management-group bicepparam
         run: az bicep build-params --file infra/params/managementgroup.bicepparam
 
+      - name: Parse-validate PowerShell scripts
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path scripts -Filter *.ps1 -Recurse
+          $failed = $false
+          foreach ($file in $files) {
+            $errors = $null
+            $tokens = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "::error file=$($file.FullName)::Parse errors found"
+              $errors | ForEach-Object { Write-Host "::error file=$($file.FullName),line=$($_.Extent.StartLineNumber)::$($_.Message)" }
+            } else {
+              Write-Host "OK: $($file.FullName)"
+            }
+          }
+          if ($failed) { throw "One or more PowerShell scripts failed to parse." }
+
+  # Gated on the AZURE_OIDC_READY repository variable (set once federated
+  # credentials exist — see README "OIDC setup (TODO)") AND, for
+  # pull_request-triggered runs, on the PR coming from a branch of this same
+  # repository. Forked-repo PRs never get OIDC secrets on GitHub regardless,
+  # but this guard makes the intent explicit and keeps the job showing a
+  # clean "skipped" status (with the reason visible in the job summary)
+  # rather than attempting a login that was never going to succeed.
   what-if:
     name: what-if (dev subscription)
     runs-on: ubuntu-latest
     needs: lint
-    # Gated until OIDC federated credentials exist for this repo. Set the
-    # repository variable AZURE_OIDC_READY to "true" once the app
-    # registration + federated credential + secrets below are configured —
-    # see README "OIDC setup (TODO)". Until then this job reports why it
-    # skipped instead of failing the PR.
+    if: |
+      vars.AZURE_OIDC_READY == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - uses: actions/checkout@v4
 
-      - name: Skip notice (OIDC not yet configured)
-        if: ${{ vars.AZURE_OIDC_READY != 'true' }}
-        run: |
-          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping what-if. See README 'OIDC setup (TODO)' to enable this job."
-
-      # --- Everything below only runs once AZURE_OIDC_READY == 'true' ---
-
       - name: Azure login (OIDC, no stored secrets)
-        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+          # Subscription IDs are not secrets — stored as repo/environment
+          # Variables, not Secrets. See README "Placeholders you must supply".
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      # `az deployment sub what-if` requires the target resource groups to
+      # already exist (Azure/bicep#14718 — what-if against resource groups
+      # that don't exist yet fails with ResourceGroupNotFound instead of
+      # showing the "would create" plan a first-run subscription needs).
+      # This step is an idempotent pre-step purely so first-run CI is green
+      # on a brand-new subscription; main.bicep itself still owns creating
+      # (and, going forward, managing) these resource groups for real.
+      - name: Ensure target resource groups exist (what-if requires them; see Azure/bicep#14718)
+        run: |
+          az group create --name rg-hub-dev --location "$AZURE_LOCATION" --only-show-errors
+          az group create --name rg-spoke-dev --location "$AZURE_LOCATION" --only-show-errors
+          az group create --name rg-avd-dev --location "$AZURE_LOCATION" --only-show-errors
 
       - name: What-if (subscription stage, dev params)
-        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        env:
+          AVD_LOCAL_ADMIN_PASSWORD: ${{ secrets.AVD_LOCAL_ADMIN_PASSWORD }}
         run: |
           az deployment sub what-if \
             --name azure-landing-zone-pr-${{ github.event.pull_request.number }} \
-            --location uksouth \
+            --location "$AZURE_LOCATION" \
             --template-file infra/main.bicep \
             --parameters infra/params/dev.bicepparam \
+            --parameters avdAdminPassword="$AVD_LOCAL_ADMIN_PASSWORD" \
             --no-pretty-print > whatif-output.txt
           cat whatif-output.txt
 
       - name: Post what-if output as PR comment
-        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
         uses: actions/github-script@v7
         with:
           script: |

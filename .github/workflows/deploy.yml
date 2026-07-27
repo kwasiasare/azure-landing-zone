@@ -8,6 +8,14 @@ name: Deploy
 #
 # Both jobs are gated behind the AZURE_OIDC_READY repository variable until
 # federated credentials exist — see README "OIDC setup (TODO)".
+#
+# `az deployment sub what-if` requires its target resource groups to already
+# exist (Azure/bicep#14718 — otherwise it fails with ResourceGroupNotFound
+# instead of showing the "would create" plan a first-run subscription
+# needs). Both what-if steps below have a tiny idempotent pre-step that
+# creates the three target resource groups if absent, purely so a first run
+# against a brand-new subscription goes green; main.bicep itself still owns
+# these resource groups going forward.
 
 on:
   push:
@@ -18,6 +26,9 @@ on:
       - "infra/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch: {}
+
+env:
+  AZURE_LOCATION: uksouth
 
 permissions:
   id-token: write
@@ -50,16 +61,28 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+          # Subscription IDs are not secrets — stored as repo Variables, not
+          # Secrets. See README "Placeholders you must supply".
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      - name: Ensure target resource groups exist (what-if requires them; see Azure/bicep#14718)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az group create --name rg-hub-dev --location "$AZURE_LOCATION" --only-show-errors
+          az group create --name rg-spoke-dev --location "$AZURE_LOCATION" --only-show-errors
+          az group create --name rg-avd-dev --location "$AZURE_LOCATION" --only-show-errors
 
       - name: What-if (subscription stage, dev params)
         if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        env:
+          AVD_LOCAL_ADMIN_PASSWORD: ${{ secrets.AVD_LOCAL_ADMIN_PASSWORD }}
         run: |
           az deployment sub what-if \
             --name azure-landing-zone-dev-${{ github.sha }} \
-            --location uksouth \
+            --location "$AZURE_LOCATION" \
             --template-file infra/main.bicep \
-            --parameters infra/params/dev.bicepparam
+            --parameters infra/params/dev.bicepparam \
+            --parameters avdAdminPassword="$AVD_LOCAL_ADMIN_PASSWORD"
 
   deploy-prod:
     name: Deploy (master branch)
@@ -92,7 +115,16 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+          # Subscription IDs are not secrets — stored as GitHub Environment
+          # Variables (on the "production" Environment), not Secrets.
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID_PROD }}
+
+      - name: Ensure target resource groups exist (what-if requires them; see Azure/bicep#14718)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az group create --name rg-hub --location "$AZURE_LOCATION" --only-show-errors
+          az group create --name rg-spoke --location "$AZURE_LOCATION" --only-show-errors
+          az group create --name rg-avd --location "$AZURE_LOCATION" --only-show-errors
 
       # What-if runs even on the deploy path so the Environment's required
       # reviewer sees the plan before the create step below actually runs
@@ -101,26 +133,32 @@ jobs:
       # approving the run).
       - name: What-if (subscription stage, prod params)
         if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        env:
+          AVD_LOCAL_ADMIN_PASSWORD: ${{ secrets.AVD_LOCAL_ADMIN_PASSWORD }}
         run: |
           az deployment sub what-if \
             --name azure-landing-zone-prod-${{ github.sha }} \
-            --location uksouth \
+            --location "$AZURE_LOCATION" \
             --template-file infra/main.bicep \
-            --parameters infra/params/prod.bicepparam
+            --parameters infra/params/prod.bicepparam \
+            --parameters avdAdminPassword="$AVD_LOCAL_ADMIN_PASSWORD"
 
       - name: Deploy (subscription stage, prod params)
         if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        env:
+          AVD_LOCAL_ADMIN_PASSWORD: ${{ secrets.AVD_LOCAL_ADMIN_PASSWORD }}
         run: |
           az deployment sub create \
             --name azure-landing-zone-prod-${{ github.sha }} \
-            --location uksouth \
+            --location "$AZURE_LOCATION" \
             --template-file infra/main.bicep \
             --parameters infra/params/prod.bicepparam \
-            --parameters avdAdminPassword="${{ secrets.AVD_LOCAL_ADMIN_PASSWORD }}"
+            --parameters avdAdminPassword="$AVD_LOCAL_ADMIN_PASSWORD"
 
       # main.managementgroup.bicep (STAGE 1) is intentionally NOT deployed
       # automatically here — it is a rare, high-privilege, one-time/rarely
       # -changed operation (tenant scope). Run it manually from an
-      # authorized operator's machine or a separate, explicitly-triggered
-      # workflow once tenant-level permissions are confirmed. See README
-      # "Deployment order".
+      # authorized operator's machine, or via the explicitly-triggered
+      # .github/workflows/stage1.yml (workflow_dispatch only), once
+      # tenant-level permissions are confirmed. See README "Deployment
+      # order".

@@ -1,0 +1,87 @@
+name: Stage 1 (management group bootstrap)
+
+# STAGE 1 (tenant scope, main.managementgroup.bicep) is a rare,
+# high-privilege operation — see README "Deployment order" — so this
+# workflow is workflow_dispatch-only, never triggered automatically by a
+# push or PR. It exists so the full environment (tenant scope through
+# resource groups) is reachable from CI at all, not just from an operator's
+# local machine, while still requiring someone to deliberately click "Run
+# workflow". Gated behind AZURE_OIDC_READY exactly like ci.yml/deploy.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm you intend to run the tenant-scope STAGE 1 deployment.'
+        required: true
+        default: ''
+
+env:
+  AZURE_LOCATION: uksouth
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-management-group:
+    name: Deploy management group + policy (tenant scope)
+    runs-on: ubuntu-latest
+    # Requires a GitHub Environment named "production" with required
+    # reviewers — STAGE 1 is at least as sensitive as the STAGE 2 prod
+    # deploy (it grants/denies policy tenant-wide), so it is gated the same
+    # way.
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "deploy" ]; then
+            echo "::error::Run this workflow again with the 'confirm' input set to exactly 'deploy'."
+            exit 1
+          fi
+
+      - name: Install/upgrade Bicep CLI
+        run: az bicep install && az bicep upgrade
+
+      - name: Build entry point
+        run: az bicep build --file infra/main.managementgroup.bicep
+
+      - name: Validate bicepparam
+        run: az bicep build-params --file infra/params/managementgroup.bicepparam
+
+      - name: Skip notice (OIDC not yet configured)
+        if: ${{ vars.AZURE_OIDC_READY != 'true' }}
+        run: |
+          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping deploy. See README 'OIDC setup (TODO)' to enable this job."
+
+      - name: Azure login (OIDC, no stored secrets)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          # Tenant-scope deployment: azure/login still needs a subscription
+          # context for the CLI session even though the deployment itself
+          # targets the tenant, not a subscription.
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID_PROD }}
+
+      - name: What-if (tenant scope, management group params)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az deployment tenant what-if \
+            --name azure-landing-zone-mg-${{ github.sha }} \
+            --location "$AZURE_LOCATION" \
+            --template-file infra/main.managementgroup.bicep \
+            --parameters infra/params/managementgroup.bicepparam
+
+      - name: Deploy (tenant scope, management group params)
+        if: ${{ vars.AZURE_OIDC_READY == 'true' }}
+        run: |
+          az deployment tenant create \
+            --name azure-landing-zone-mg-${{ github.sha }} \
+            --location "$AZURE_LOCATION" \
+            --template-file infra/main.managementgroup.bicep \
+            --parameters infra/params/managementgroup.bicepparam
