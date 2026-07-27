@@ -4,12 +4,21 @@ The single pooled session host (`avd-sh-01`, deployed by
 `infra/modules/avd.bicep`) is deallocated automatically every night by a
 `Microsoft.DevTestLab/schedules` resource named
 `shutdown-computevm-avd-sh-01`, driven by these `main.bicep` parameters
-(with their `dev.bicepparam`/`prod.bicepparam` defaults):
+(plumbed all the way through from `dev.bicepparam`/`prod.bicepparam` — see
+`avdAutoShutdownTimeUtc`/`avdAutoShutdownTimeZoneId` in `main.bicep`, passed
+to `avd.bicep`'s `autoShutdownTimeUtc`/`autoShutdownTimeZoneId` params):
 
-| Behaviour | Parameter (in `avd.bicep`) | Default |
+| Behaviour | Parameter (`main.bicep` -> `avd.bicep`) | Default |
 |---|---|---|
-| Shutdown time | `autoShutdownTimeUtc` | `1900` (19:00) |
-| Time zone | `autoShutdownTimeZoneId` | `UTC` |
+| Shutdown time | `avdAutoShutdownTimeUtc` -> `autoShutdownTimeUtc` | `1900` (19:00) |
+| Time zone | `avdAutoShutdownTimeZoneId` -> `autoShutdownTimeZoneId` | `UTC` |
+
+The host pool name (`avdHostPoolName` -> `hostPoolName`, default
+`hp-portfolio-pooled`/`hp-portfolio-pooled-dev`) and max session limit
+(`avdMaxSessionLimit` -> `maxSessionLimit`, default `4`) are similarly
+plumbed through `main.bicep` if you need to override them; the session
+host VM name itself (`avd-sh-01`) is not currently parameterized past
+`avd.bicep`'s own `sessionHostVmName` default.
 
 This is the same "auto-shutdown" feature available in the Azure Portal for
 any VM (not a DevTest Labs–only feature) — it stops **and deallocates** the
@@ -41,7 +50,7 @@ resource group naming (`infra/params/dev.bicepparam`).
 
 ## Changing the schedule
 
-Edit `autoShutdownTimeUtc` / `autoShutdownTimeZoneId` in
+Edit `avdAutoShutdownTimeUtc` / `avdAutoShutdownTimeZoneId` in
 `infra/params/dev.bicepparam` or `prod.bicepparam` (they are passed through
 `main.bicep` -> `avd.bicep`) and re-run the subscription-stage deployment;
 the schedule resource is idempotent and updates in place.
