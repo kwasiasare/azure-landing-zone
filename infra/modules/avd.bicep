@@ -71,6 +71,9 @@ resource hostPool 'Microsoft.DesktopVirtualization/hostPools@2023-09-05' = {
     preferredAppGroupType: 'Desktop'
     maxSessionLimit: maxSessionLimit
     startVMOnConnect: true
+    // Required so the AVD client can discover this is an Entra-joined (not
+    // hybrid/AD-joined) host pool and skip the domain-join sign-in prompt.
+    customRdpProperty: 'targetisaadjoined:i:1;'
     registrationInfo: {
       expirationTime: hostPoolRegistrationTokenExpirationUtc
       registrationTokenOperation: 'Update'
@@ -124,6 +127,11 @@ resource sessionHostVm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: sessionHostVmName
   location: location
   tags: tags
+  // System-assigned identity is not consumed by any resource in this
+  // module directly — it exists because the AADLoginForWindows and
+  // AzureMonitorWindowsAgent VM extensions below use it under the hood for
+  // Entra join and Azure Monitor authentication respectively (both
+  // extensions require the host VM to have a managed identity present).
   identity: {
     type: 'SystemAssigned'
   }
@@ -131,11 +139,19 @@ resource sessionHostVm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     hardwareProfile: {
       vmSize: vmSize
     }
+    // Azure Hybrid Benefit for the Windows 11 multi-session/client image —
+    // required licensing declaration for this SKU family even though no
+    // benefit is actually being redeemed in this demo.
+    licenseType: 'Windows_Client'
     storageProfile: {
       imageReference: {
         publisher: 'MicrosoftWindowsDesktop'
         offer: 'windows-11'
-        sku: 'win11-23h2-avd'
+        // Periodic review: Microsoft retires older win11-*-avd SKUs on its
+        // own cadence — confirm this is still a supported/current SKU at
+        // https://learn.microsoft.com/azure/virtual-desktop/prepare-windows-11
+        // before each redeploy and bump if a newer one has shipped.
+        sku: 'win11-24h2-avd'
         version: 'latest'
       }
       osDisk: {
@@ -187,11 +203,15 @@ resource aadLoginExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09
     type: 'AADLoginForWindows'
     typeHandlerVersion: '2.2'
     autoUpgradeMinorVersion: true
+    enableAutomaticUpgrade: true
   }
 }
 
 // Registers the VM as an AVD session host via the published DSC package.
-// Must run after Entra join.
+// Must run after Entra join. The DSC extension type does not support
+// enableAutomaticUpgrade (not in the platform's auto-upgrade allowlist for
+// legacy PowerShell DSC handlers), so only autoUpgradeMinorVersion applies
+// here.
 resource avdAgentDscExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = {
   parent: sessionHostVm
   name: 'Microsoft.PowerShell.DSC'
@@ -204,9 +224,19 @@ resource avdAgentDscExtension 'Microsoft.Compute/virtualMachines/extensions@2023
     settings: {
       modulesUrl: avdAgentDscPackageUrl
       configurationFunction: 'Configuration.ps1\\AddSessionHost'
+    }
+    // The registration token is a secret credential the DSC configuration
+    // uses to join the host pool — it must live in protectedSettings (only
+    // ever visible to the extension runtime inside the VM, never persisted
+    // in plain text in the deployment's activity log/resource properties),
+    // not settings.
+    protectedSettings: {
       properties: {
         hostPoolName: hostPool.name
-        registrationInfoToken: hostPool.properties.registrationInfo.token
+        // listRegistrationTokens() invokes the runtime action that returns
+        // the current token; hostPool.properties.registrationInfo.token is
+        // null on a GET for this API version and must not be used.
+        registrationInfoToken: hostPool.listRegistrationTokens().value[0].token
         aadJoin: true
       }
     }
@@ -214,14 +244,6 @@ resource avdAgentDscExtension 'Microsoft.Compute/virtualMachines/extensions@2023
   dependsOn: [
     aadLoginExtension
   ]
-}
-
-resource dcrAssociation 'Microsoft.Insights/dataCollectionRuleAssociations@2022-06-01' = if (!empty(dataCollectionRuleResourceId)) {
-  name: 'dcr-association-${sessionHostVmName}'
-  scope: sessionHostVm
-  properties: {
-    dataCollectionRuleId: dataCollectionRuleResourceId
-  }
 }
 
 resource monitoringAgentExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = if (!empty(logAnalyticsWorkspaceResourceId)) {
@@ -233,7 +255,28 @@ resource monitoringAgentExtension 'Microsoft.Compute/virtualMachines/extensions@
     type: 'AzureMonitorWindowsAgent'
     typeHandlerVersion: '1.0'
     autoUpgradeMinorVersion: true
+    enableAutomaticUpgrade: true
   }
+  // Not functionally required by the agent itself, but keeps VM extension
+  // provisioning deterministic/sequential rather than racing the DSC
+  // extension for the VM's single extension-handler slot.
+  dependsOn: [
+    avdAgentDscExtension
+  ]
+}
+
+resource dcrAssociation 'Microsoft.Insights/dataCollectionRuleAssociations@2022-06-01' = if (!empty(dataCollectionRuleResourceId)) {
+  name: 'dcr-association-${sessionHostVmName}'
+  scope: sessionHostVm
+  properties: {
+    dataCollectionRuleId: dataCollectionRuleResourceId
+  }
+  // Associating the DCR before the monitor agent is installed is harmless
+  // but pointless (nothing is running yet to honor it) — order after the
+  // agent extension for a clean, readable provisioning sequence.
+  dependsOn: [
+    monitoringAgentExtension
+  ]
 }
 
 // Cost control: deallocate the session host every night. Works for any
