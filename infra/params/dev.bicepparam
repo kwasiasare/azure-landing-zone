@@ -23,20 +23,46 @@ param avdResourceGroupName = 'rg-avd-dev'
 param deployBastion = false
 
 // PLACEHOLDER — replace with your real admin source CIDR (e.g. office/VPN
-// egress IP as x.x.x.x/32) before ever deploying for real.
-param trustedAdminSourceCidr = '10.0.0.0/8'
+// egress IP as x.x.x.x/32) before ever deploying for real. 192.0.2.0/24
+// (TEST-NET-1) is genuinely non-routable, unlike a real RFC1918 range.
+param trustedAdminSourceCidr = '192.0.2.0/24'
+
+param hubVnetAddressPrefix = '10.0.0.0/22'
+param bastionSubnetPrefix = '10.0.0.0/26'
+param sharedServicesSubnetPrefix = '10.0.1.0/24'
+param spokeVnetAddressPrefix = '10.1.0.0/22'
+param workloadSubnetPrefix = '10.1.0.0/24'
+param avdSubnetPrefix = '10.1.1.0/24'
 
 param logAnalyticsWorkspaceName = 'log-portfolio-hub-dev'
 param logAnalyticsDailyQuotaGb = 1
 
 param avdAdminUsername = 'avdlocaladmin'
-// Local admin password is intentionally NOT set here. Supply it at deploy
-// time only, e.g.:
-//   az deployment sub create ... --parameters avdAdminPassword=$AVD_ADMIN_PASSWORD
-// sourced from a GitHub Actions secret. Leaving it unset here keeps the repo
-// secret-free; the module param default is also '' so `bicep build` still
-// compiles cleanly without a real value.
+// Local admin password is intentionally NOT hardcoded here. Sourced from the
+// AVD_LOCAL_ADMIN_PASSWORD environment variable when present (CI what-if/
+// deploy steps export it from the AVD_LOCAL_ADMIN_PASSWORD GitHub secret —
+// see .github/workflows/*.yml); falls back to an inert 12+ char placeholder
+// so `az bicep build-params` keeps compiling cleanly with no env var set
+// (e.g. this lint job, local validation) and to satisfy the @minLength(12)
+// constraint on avdAdminPassword in main.bicep. The workflow's explicit
+// `--parameters avdAdminPassword="$AVD_LOCAL_ADMIN_PASSWORD"` CLI override
+// on the what-if/deploy commands is the real source of truth at deploy
+// time; this fallback only matters when that override isn't supplied.
+param avdAdminPassword = readEnvironmentVariable('AVD_LOCAL_ADMIN_PASSWORD', 'Local-Dev-Placeholder-Pwd1')
 param avdVmSize = 'Standard_D2s_v5'
+param avdHostPoolName = 'hp-portfolio-pooled-dev'
+param avdMaxSessionLimit = 4
+
+// Deallocated nightly at 19:00 UTC by default; startVMOnConnect powers the
+// host back on when a user launches the desktop (see
+// scripts/session-host-deallocate-notes.md).
+param avdAutoShutdownTimeUtc = '1900'
+param avdAutoShutdownTimeZoneId = 'UTC'
+
+// PLACEHOLDER — object ID of the tenant's "Azure Virtual Desktop" enterprise
+// application. See README "Placeholders you must supply". Left empty: the
+// startVMOnConnect role assignment is skipped until this is filled in.
+param avdServicePrincipalObjectId = ''
 
 param budgetAmountUsd = 30
 // PLACEHOLDER — replace with a real distribution list/email before relying
@@ -44,6 +70,12 @@ param budgetAmountUsd = 30
 param budgetContactEmails = [
   'CHANGE_ME@example.com'
 ]
+// Empty = auto-computed 'budget-portfolio-landingzone-dev'.
+param budgetNameOverride = ''
+// Fixed literal, not utcNow()-derived — see budget.bicep for why. Update
+// only if intentionally recreating the budget (Consumption budgets treat
+// startDate as immutable after creation).
+param budgetStartDate = '2026-07-01'
 
 param tags = {
   environment: 'dev'
