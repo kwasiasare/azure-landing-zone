@@ -5,8 +5,11 @@
 // ---------------------------------------------------------------------------
 targetScope = 'subscription'
 
-@description('Name of the budget.')
-param budgetName string = 'budget-portfolio-landingzone'
+@description('Environment tag/suffix used to build the default budget name when budgetName is not explicitly overridden (e.g. dev, prod). Keeps dev/prod budgets from colliding — Microsoft.Consumption/budgets names are unique per subscription.')
+param environmentName string = 'dev'
+
+@description('Name of the budget. Defaults to budget-portfolio-landingzone-<environmentName> so dev and prod never collide on the same budget name at subscription scope.')
+param budgetName string = 'budget-portfolio-landingzone-${environmentName}'
 
 @description('Monthly budget amount in USD.')
 param amount int = 30
@@ -19,8 +22,8 @@ param amount int = 30
 ])
 param timeGrain string = 'Monthly'
 
-@description('First day of the month the budget starts tracking from (yyyy-MM-01). Defaults to the first day of the current month at deploy time; override for a fixed, reproducible value if needed.')
-param startDate string = '${utcNow('yyyy-MM')}-01'
+@description('REQUIRED — first day of the month the budget starts tracking from (yyyy-MM-01), e.g. 2026-07-01. Deliberately has no utcNow()-derived default: a value that changes on every deployment based on "today" breaks idempotency (every re-deploy would attempt to change timePeriod.startDate, which Microsoft.Consumption/budgets treats as immutable after creation and rejects). Supply a fixed literal in the calling bicepparam and only change it if you are intentionally recreating the budget.')
+param startDate string
 
 @description('PLACEHOLDER — email address(es) that receive budget alerts. Replace before deploying; alerts are silently useless if left as the default.')
 param contactEmails array = [
