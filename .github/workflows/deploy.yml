@@ -1,16 +1,16 @@
-name: Deploy
+﻿name: Deploy
 
 # dev branch  -> what-if only, never deploys (dev is a validation branch,
-#                not a separate Azure environment — see README "Dev vs prod").
+#                not a separate Azure environment â€” see README "Dev vs prod").
 # master branch -> real deploy, gated by the `production` GitHub Environment
 #                  (configure required reviewers on that Environment before
 #                  the first real run).
 #
 # Both jobs are gated behind the AZURE_OIDC_READY repository variable until
-# federated credentials exist — see README "OIDC setup (TODO)".
+# federated credentials exist â€” see README "OIDC setup (TODO)".
 #
 # `az deployment sub what-if` requires its target resource groups to already
-# exist (Azure/bicep#14718 — otherwise it fails with ResourceGroupNotFound
+# exist (Azure/bicep#14718 â€” otherwise it fails with ResourceGroupNotFound
 # instead of showing the "would create" plan a first-run subscription
 # needs). Both what-if steps below have a tiny idempotent pre-step that
 # creates the three target resource groups if absent, purely so a first run
@@ -28,7 +28,7 @@ on:
   workflow_dispatch: {}
 
 env:
-  AZURE_LOCATION: uksouth
+  AZURE_LOCATION: eastus2
 
 permissions:
   id-token: write
@@ -53,7 +53,7 @@ jobs:
       - name: Skip notice (OIDC not yet configured)
         if: ${{ vars.AZURE_OIDC_READY != 'true' }}
         run: |
-          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping what-if. See README 'OIDC setup (TODO)' to enable this job."
+          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' â€” skipping what-if. See README 'OIDC setup (TODO)' to enable this job."
 
       - name: Azure login (OIDC, no stored secrets)
         if: ${{ vars.AZURE_OIDC_READY == 'true' }}
@@ -61,7 +61,7 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          # Subscription IDs are not secrets — stored as repo Variables, not
+          # Subscription IDs are not secrets â€” stored as repo Variables, not
           # Secrets. See README "Placeholders you must supply".
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID_DEV }}
 
@@ -89,7 +89,7 @@ jobs:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     # Requires a GitHub Environment named "production" with required
-    # reviewers configured — this is what turns a push to master into an
+    # reviewers configured â€” this is what turns a push to master into an
     # approval-gated deploy instead of an immediate one.
     environment:
       name: production
@@ -107,7 +107,7 @@ jobs:
       - name: Skip notice (OIDC not yet configured)
         if: ${{ vars.AZURE_OIDC_READY != 'true' }}
         run: |
-          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping deploy. See README 'OIDC setup (TODO)' to enable this job."
+          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' â€” skipping deploy. See README 'OIDC setup (TODO)' to enable this job."
 
       - name: Azure login (OIDC, no stored secrets)
         if: ${{ vars.AZURE_OIDC_READY == 'true' }}
@@ -115,7 +115,7 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          # Subscription IDs are not secrets — stored as GitHub Environment
+          # Subscription IDs are not secrets â€” stored as GitHub Environment
           # Variables (on the "production" Environment), not Secrets.
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID_PROD }}
 
@@ -156,9 +156,10 @@ jobs:
             --parameters avdAdminPassword="$AVD_LOCAL_ADMIN_PASSWORD"
 
       # main.managementgroup.bicep (STAGE 1) is intentionally NOT deployed
-      # automatically here — it is a rare, high-privilege, one-time/rarely
+      # automatically here â€” it is a rare, high-privilege, one-time/rarely
       # -changed operation (tenant scope). Run it manually from an
       # authorized operator's machine, or via the explicitly-triggered
       # .github/workflows/stage1.yml (workflow_dispatch only), once
       # tenant-level permissions are confirmed. See README "Deployment
       # order".
+

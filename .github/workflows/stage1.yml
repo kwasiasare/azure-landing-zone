@@ -1,7 +1,7 @@
-name: Stage 1 (management group bootstrap)
+﻿name: Stage 1 (management group bootstrap)
 
 # STAGE 1 (tenant scope, main.managementgroup.bicep) is a rare,
-# high-privilege operation — see README "Deployment order" — so this
+# high-privilege operation â€” see README "Deployment order" â€” so this
 # workflow is workflow_dispatch-only, never triggered automatically by a
 # push or PR. It exists so the full environment (tenant scope through
 # resource groups) is reachable from CI at all, not just from an operator's
@@ -17,7 +17,7 @@ on:
         default: ''
 
 env:
-  AZURE_LOCATION: uksouth
+  AZURE_LOCATION: eastus2
 
 permissions:
   id-token: write
@@ -28,7 +28,7 @@ jobs:
     name: Deploy management group + policy (tenant scope)
     runs-on: ubuntu-latest
     # Requires a GitHub Environment named "production" with required
-    # reviewers — STAGE 1 is at least as sensitive as the STAGE 2 prod
+    # reviewers â€” STAGE 1 is at least as sensitive as the STAGE 2 prod
     # deploy (it grants/denies policy tenant-wide), so it is gated the same
     # way.
     environment:
@@ -55,7 +55,7 @@ jobs:
       - name: Skip notice (OIDC not yet configured)
         if: ${{ vars.AZURE_OIDC_READY != 'true' }}
         run: |
-          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' — skipping deploy. See README 'OIDC setup (TODO)' to enable this job."
+          echo "::notice::AZURE_OIDC_READY repo variable is not 'true' â€” skipping deploy. See README 'OIDC setup (TODO)' to enable this job."
 
       - name: Azure login (OIDC, no stored secrets)
         if: ${{ vars.AZURE_OIDC_READY == 'true' }}
@@ -85,3 +85,4 @@ jobs:
             --location "$AZURE_LOCATION" \
             --template-file infra/main.managementgroup.bicep \
             --parameters infra/params/managementgroup.bicepparam
+

@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 using '../main.bicep'
 
-param location = 'uksouth'
+param location = 'eastus2'
 param environmentName = 'dev'
 
 param hubResourceGroupName = 'rg-hub-dev'
@@ -62,13 +62,13 @@ param avdAutoShutdownTimeZoneId = 'UTC'
 // PLACEHOLDER — object ID of the tenant's "Azure Virtual Desktop" enterprise
 // application. See README "Placeholders you must supply". Left empty: the
 // startVMOnConnect role assignment is skipped until this is filled in.
-param avdServicePrincipalObjectId = ''
+param avdServicePrincipalObjectId = '1d2ed920-2c3a-4b30-80d9-9480bd594272' // "Azure Virtual Desktop" SP in spdcdev01
 
 param budgetAmountUsd = 30
 // PLACEHOLDER — replace with a real distribution list/email before relying
 // on budget alerts.
 param budgetContactEmails = [
-  'CHANGE_ME@example.com'
+  'kwasi.spreadcom@gmail.com'
 ]
 // Empty = auto-computed 'budget-portfolio-landingzone-dev'.
 param budgetNameOverride = ''

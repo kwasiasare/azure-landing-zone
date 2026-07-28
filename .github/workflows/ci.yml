@@ -1,7 +1,7 @@
-name: CI
+﻿name: CI
 
 # Runs on every PR: compiles + lints every Bicep entry point, parse-validates
-# every PowerShell script, then (once OIDC credentials exist — see README
+# every PowerShell script, then (once OIDC credentials exist â€” see README
 # "OIDC setup") runs `what-if` against the dev subscription and posts the
 # plan as a PR comment. Nothing in this workflow ever mutates cloud state.
 
@@ -17,7 +17,7 @@ on:
   workflow_dispatch: {}
 
 env:
-  AZURE_LOCATION: uksouth
+  AZURE_LOCATION: eastus2
 
 permissions:
   id-token: write # required for azure/login OIDC federated credential exchange
@@ -69,7 +69,7 @@ jobs:
           if ($failed) { throw "One or more PowerShell scripts failed to parse." }
 
   # Gated on the AZURE_OIDC_READY repository variable (set once federated
-  # credentials exist — see README "OIDC setup (TODO)") AND, for
+  # credentials exist â€” see README "OIDC setup (TODO)") AND, for
   # pull_request-triggered runs, on the PR coming from a branch of this same
   # repository. Forked-repo PRs never get OIDC secrets on GitHub regardless,
   # but this guard makes the intent explicit and keeps the job showing a
@@ -90,12 +90,12 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          # Subscription IDs are not secrets — stored as repo/environment
+          # Subscription IDs are not secrets â€” stored as repo/environment
           # Variables, not Secrets. See README "Placeholders you must supply".
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID_DEV }}
 
       # `az deployment sub what-if` requires the target resource groups to
-      # already exist (Azure/bicep#14718 — what-if against resource groups
+      # already exist (Azure/bicep#14718 â€” what-if against resource groups
       # that don't exist yet fails with ResourceGroupNotFound instead of
       # showing the "would create" plan a first-run subscription needs).
       # This step is an idempotent pre-step purely so first-run CI is green
@@ -126,10 +126,11 @@ jobs:
           script: |
             const fs = require('fs');
             const output = fs.readFileSync('whatif-output.txt', 'utf8').slice(0, 60000);
-            const body = `### Azure what-if — subscription stage (dev)\n\n<details><summary>Show plan</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>`;
+            const body = `### Azure what-if â€” subscription stage (dev)\n\n<details><summary>Show plan</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body,
             });
+
