@@ -62,7 +62,14 @@ param avdAutoShutdownTimeZoneId = 'UTC'
 // PLACEHOLDER — object ID of the tenant's "Azure Virtual Desktop" enterprise
 // application. See README "Placeholders you must supply". Left empty: the
 // startVMOnConnect role assignment is skipped until this is filled in.
-param avdServicePrincipalObjectId = '1d2ed920-2c3a-4b30-80d9-9480bd594272' // "Azure Virtual Desktop" SP in spdcdev01
+// AVD SP in spdcdev01 is 1d2ed920-2c3a-4b30-80d9-9480bd594272, but the CI
+// identity holds Contributor only (no roleAssignments/write), so the
+// startVMOnConnect grant is left out of pipeline scope. Run once manually as
+// admin before relying on Start VM on Connect:
+//   az role assignment create --assignee 1d2ed920-2c3a-4b30-80d9-9480bd594272 \
+//     --role "Desktop Virtualization Power On Contributor" \
+//     --scope /subscriptions/7b5fa8b6-6395-404f-b26d-9d006d3f7ece
+param avdServicePrincipalObjectId = ''
 
 param budgetAmountUsd = 30
 // PLACEHOLDER — replace with a real distribution list/email before relying
