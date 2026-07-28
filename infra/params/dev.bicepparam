@@ -49,7 +49,8 @@ param avdAdminUsername = 'avdlocaladmin'
 // on the what-if/deploy commands is the real source of truth at deploy
 // time; this fallback only matters when that override isn't supplied.
 param avdAdminPassword = readEnvironmentVariable('AVD_LOCAL_ADMIN_PASSWORD', 'Local-Dev-Placeholder-Pwd1')
-param avdVmSize = 'Standard_D2s_v5'
+// DSv5 family has 0 quota on this subscription; Dasv7 has 10 vCPUs available.
+param avdVmSize = 'Standard_D2as_v7'
 param avdHostPoolName = 'hp-portfolio-pooled-dev'
 param avdMaxSessionLimit = 4
 
